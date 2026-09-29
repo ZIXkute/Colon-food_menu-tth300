@@ -1,23 +1,21 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Plus, Pencil, Trash2, Check, X, UtensilsCrossed, LayoutDashboard, BookOpen, Search } from "lucide-react";
 
+const API = "http://localhost:3000/api/menu";
 const CATEGORIES = ["Starters", "Mains", "Desserts", "Drinks"];
-
-const SEED_DISHES = [
-  { id: 1, name: "Roasted Beet & Burrata", category: "Starters", price: 12.5, description: "Roasted golden beets, whipped burrata, toasted hazelnuts, mint oil.", available: true },
-  { id: 2, name: "Charred Octopus", category: "Starters", price: 15.0, description: "Spanish octopus, smoked paprika, crispy potatoes, salsa verde.", available: true },
-  { id: 3, name: "Braised Short Rib", category: "Mains", price: 28.0, description: "Red wine braised short rib, celery root purée, charred scallion.", available: true },
-  { id: 4, name: "Wild Mushroom Risotto", category: "Mains", price: 21.0, description: "Arborio rice, foraged mushrooms, aged parmesan, thyme.", available: true },
-  { id: 5, name: "Pan-Seared Halibut", category: "Mains", price: 26.5, description: "Halibut, brown butter, capers, fingerling potatoes.", available: false },
-  { id: 6, name: "Olive Oil Cake", category: "Desserts", price: 9.0, description: "Citrus-soaked olive oil cake, mascarpone, candied orange.", available: true },
-  { id: 7, name: "Basil Smash", category: "Drinks", price: 13.0, description: "Gin, fresh basil, lime, soda.", available: true },
-  { id: 8, name: "House Old Fashioned", category: "Drinks", price: 14.0, description: "Bourbon, demerara sugar, orange bitters.", available: true },
-];
-
 const EMPTY_FORM = { name: "", category: CATEGORIES[0], price: "", description: "", available: true };
 
+// MySQL returns price as a string and available as 1/0
+const normalize = (row) => ({
+  ...row,
+  price: Number(row.price),
+  available: Boolean(row.available),
+});
+
 export default function App() {
-  const [dishes, setDishes] = useState(SEED_DISHES);
+  const [dishes, setDishes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState("");
   const [activeTab, setActiveTab] = useState("dashboard");
   const [filterCategory, setFilterCategory] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
@@ -25,6 +23,24 @@ export default function App() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
+
+  const loadDishes = async () => {
+    try {
+      const res = await fetch(API);
+      if (!res.ok) throw new Error("Server error");
+      const rows = await res.json();
+      setDishes(rows.map(normalize));
+      setApiError("");
+    } catch {
+      setApiError("Can't reach the server. Is `npm start` running?");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDishes();
+  }, []);
 
   const openAddForm = () => {
     setEditingId(null);
@@ -43,35 +59,61 @@ export default function App() {
   const validate = () => {
     const e = {};
     if (!form.name.trim()) e.name = "Name your dish.";
+    if (!form.description.trim()) e.description = "Add a short description.";
     const priceNum = parseFloat(form.price);
     if (!form.price || isNaN(priceNum) || priceNum <= 0) e.price = "Enter a price above $0.";
     return e;
   };
 
-  const handleSubmit = (evt) => {
+  const handleSubmit = async (evt) => {
     evt.preventDefault();
     const e = validate();
     if (Object.keys(e).length > 0) {
       setErrors(e);
       return;
     }
-    const priceNum = parseFloat(form.price);
-    if (editingId) {
-      setDishes((prev) => prev.map((d) => (d.id === editingId ? { ...d, ...form, price: priceNum } : d)));
-    } else {
-      const newId = dishes.length ? Math.max(...dishes.map((d) => d.id)) + 1 : 1;
-      setDishes((prev) => [...prev, { id: newId, ...form, price: priceNum }]);
+    const payload = { ...form, price: parseFloat(form.price), available: Boolean(form.available) };
+    try {
+      const res = await fetch(editingId ? `${API}/${editingId}` : API, {
+        method: editingId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setErrors({ form: data.message || "Failed to save dish." });
+        return;
+      }
+      await loadDishes();
+      setActiveTab("menu");
+    } catch {
+      setErrors({ form: "Can't reach the server." });
     }
-    setActiveTab("menu");
   };
 
-  const handleDelete = (id) => {
-    setDishes((prev) => prev.filter((d) => d.id !== id));
+  const handleDelete = async (id) => {
+    try {
+      const res = await fetch(`${API}/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      await loadDishes();
+    } catch {
+      setApiError("Failed to delete dish.");
+    }
     setDeleteConfirmId(null);
   };
 
-  const toggleAvailable = (id) => {
-    setDishes((prev) => prev.map((d) => (d.id === id ? { ...d, available: !d.available } : d)));
+  const toggleAvailable = async (dish) => {
+    try {
+      const res = await fetch(`${API}/${dish.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...dish, available: !dish.available }),
+      });
+      if (!res.ok) throw new Error();
+      await loadDishes();
+    } catch {
+      setApiError("Failed to update availability.");
+    }
   };
 
   const visibleDishes = dishes.filter((d) => {
@@ -111,27 +153,13 @@ export default function App() {
         }
         .fm-app *, .fm-app *::before, .fm-app *::after { box-sizing: border-box; }
 
-        .fm-header {
-          display: flex;
-          flex-wrap: wrap;
-          align-items: center;
-          justify-content: space-between;
-          gap: 16px;
-          padding: 20px 28px;
-          border-bottom: 1px solid var(--border);
-        }
+        .fm-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 28px; border-bottom: 1px solid var(--border); }
         .fm-brand { display: flex; align-items: center; gap: 10px; color: var(--accent); }
         .fm-brand-name { font-family: 'Fraunces', Georgia, serif; font-size: 22px; font-weight: 600; color: var(--text); }
         .fm-brand-tag { font-size: 13px; color: var(--text-muted); margin-left: 4px; }
 
         .fm-tabs { display: flex; gap: 4px; }
-        .fm-tab-btn {
-          display: flex; align-items: center; gap: 6px;
-          background: transparent; border: none; cursor: pointer;
-          color: var(--text-muted); font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 500;
-          padding: 8px 14px; border-bottom: 2px solid transparent;
-          transition: color 0.15s ease, border-color 0.15s ease;
-        }
+        .fm-tab-btn { display: flex; align-items: center; gap: 6px; background: transparent; border: none; cursor: pointer; color: var(--text-muted); font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 500; padding: 8px 14px; border-bottom: 2px solid transparent; transition: color 0.15s ease, border-color 0.15s ease; }
         .fm-tab-btn:hover { color: var(--text); }
         .fm-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
 
@@ -139,7 +167,6 @@ export default function App() {
         .fm-page-title { font-family: 'Fraunces', Georgia, serif; font-size: 28px; font-weight: 600; margin: 0 0 6px; }
         .fm-page-sub { color: var(--text-muted); font-size: 14px; margin: 0 0 32px; }
 
-        /* Dashboard */
         .fm-stats-row { display: flex; align-items: stretch; gap: 0; margin-bottom: 40px; flex-wrap: wrap; }
         .fm-stat { flex: 1; min-width: 140px; padding: 4px 24px; }
         .fm-stat:first-child { padding-left: 0; }
@@ -160,27 +187,16 @@ export default function App() {
         .fm-recent-item:last-child { border-bottom: none; }
         .fm-recent-cat { color: var(--text-muted); font-size: 13px; }
 
-        /* Menu list */
         .fm-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
         .fm-chips { display: flex; gap: 8px; flex-wrap: wrap; }
-        .fm-chip {
-          background: var(--surface); border: 1px solid var(--border); color: var(--text-muted);
-          padding: 6px 14px; border-radius: 999px; font-size: 13px; cursor: pointer; font-family: 'Inter', sans-serif;
-        }
+        .fm-chip { background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); padding: 6px 14px; border-radius: 999px; font-size: 13px; cursor: pointer; font-family: 'Inter', sans-serif; }
         .fm-chip.active { background: var(--accent); border-color: var(--accent); color: #22261F; font-weight: 600; }
 
         .fm-search { position: relative; }
-        .fm-search input {
-          background: var(--surface); border: 1px solid var(--border); color: var(--text);
-          padding: 8px 12px 8px 34px; border-radius: 6px; font-size: 13px; font-family: 'Inter', sans-serif; width: 200px;
-        }
+        .fm-search input { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 12px 8px 34px; border-radius: 6px; font-size: 13px; font-family: 'Inter', sans-serif; width: 200px; }
         .fm-search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); }
 
-        .fm-add-btn {
-          display: inline-flex; align-items: center; gap: 6px;
-          background: var(--accent); color: #22261F; border: none; border-radius: 6px;
-          padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif;
-        }
+        .fm-add-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--accent); color: #22261F; border: none; border-radius: 6px; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif; }
         .fm-add-btn:hover { background: #E3AF57; }
 
         .fm-dish-row { padding: 16px 0; border-bottom: 1px solid var(--border); }
@@ -208,13 +224,9 @@ export default function App() {
 
         .fm-empty { color: var(--text-muted); font-size: 14px; padding: 40px 0; text-align: center; }
 
-        /* Form */
         .fm-form-group { margin-bottom: 20px; }
         .fm-label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
-        .fm-input, .fm-select, .fm-textarea {
-          width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text);
-          padding: 10px 12px; border-radius: 6px; font-size: 14px; font-family: 'Inter', sans-serif;
-        }
+        .fm-input, .fm-select, .fm-textarea { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 6px; font-size: 14px; font-family: 'Inter', sans-serif; }
         .fm-input:focus, .fm-select:focus, .fm-textarea:focus { outline: none; border-color: var(--accent); }
         .fm-textarea { resize: vertical; min-height: 80px; }
         .fm-error { color: var(--danger); font-size: 12px; margin-top: 5px; }
@@ -252,6 +264,9 @@ export default function App() {
       </header>
 
       <main className="fm-content">
+        {loading && <div className="fm-empty">Loading menu…</div>}
+        {apiError && <div className="fm-error" style={{ marginBottom: 16 }}>{apiError}</div>}
+
         {activeTab === "dashboard" && (
           <>
             <h1 className="fm-page-title">Dashboard</h1>
@@ -323,7 +338,7 @@ export default function App() {
               </div>
             </div>
 
-            {visibleDishes.length === 0 && <div className="fm-empty">No dishes match. Try a different filter or add a new one.</div>}
+            {!loading && visibleDishes.length === 0 && <div className="fm-empty">No dishes match. Try a different filter or add a new one.</div>}
 
             {visibleDishes.map((d) => (
               <div className="fm-dish-row" key={d.id}>
@@ -335,7 +350,7 @@ export default function App() {
                 <div className="fm-dish-desc">{d.description}</div>
                 <div className="fm-dish-meta">
                   <span className="fm-cat-tag">{d.category}</span>
-                  <button className={`fm-avail-btn ${d.available ? "on" : "off"}`} onClick={() => toggleAvailable(d.id)}>
+                  <button className={`fm-avail-btn ${d.available ? "on" : "off"}`} onClick={() => toggleAvailable(d)}>
                     {d.available ? <Check size={13} /> : <X size={13} />}
                     {d.available ? "Available" : "86'd"}
                   </button>
@@ -387,6 +402,7 @@ export default function App() {
               <div className="fm-form-group">
                 <label className="fm-label">Description</label>
                 <textarea className="fm-textarea" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Short description of the dish" />
+                {errors.description && <div className="fm-error">{errors.description}</div>}
               </div>
 
               <div className="fm-form-group">
@@ -398,6 +414,8 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              {errors.form && <div className="fm-error">{errors.form}</div>}
 
               <div className="fm-form-actions">
                 <button type="submit" className="fm-btn-primary">{editingId ? "Save changes" : "Add to menu"}</button>
