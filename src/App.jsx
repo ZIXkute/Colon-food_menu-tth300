@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Plus, Pencil, Trash2, Check, X, UtensilsCrossed, LayoutDashboard, BookOpen, Search } from "lucide-react";
 
-const API = "http://localhost:3000/api/menu";
+const API = "/api/menu";
 const CATEGORIES = ["Starters", "Mains", "Desserts", "Drinks"];
 const EMPTY_FORM = { name: "", category: CATEGORIES[0], price: "", description: "", available: true };
 
